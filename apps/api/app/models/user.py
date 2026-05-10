@@ -9,6 +9,7 @@ from . import Base, utc_now
 
 class User(Base):
     __tablename__ = "users"
+    __table_args__ = {"schema": "auth"}
 
     user_id: Mapped[_PyUUID] = mapped_column(PG_UUID(as_uuid=True), default=uuid4, primary_key=True)
     email: Mapped[str] = mapped_column(String(320), nullable=False, unique=True)

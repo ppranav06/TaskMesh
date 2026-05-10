@@ -9,6 +9,7 @@ from . import Base, utc_now
 
 class Organisation(Base):
     __tablename__ = "organisations"
+    __table_args__ = {"schema": "organisations"}
 
     organisation_id: Mapped[_PyUUID] = mapped_column(PG_UUID(as_uuid=True), default=uuid4, primary_key=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -19,6 +20,7 @@ class Organisation(Base):
 
 class OrgMember(Base):
     __tablename__ = "org_members"
+    __table_args__ = {"schema": "organisations"}
 
     org_member_id: Mapped[_PyUUID] = mapped_column(PG_UUID(as_uuid=True), default=uuid4, primary_key=True)
     user_id: Mapped[_PyUUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False)
