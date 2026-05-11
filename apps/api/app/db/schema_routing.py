@@ -1,106 +1,60 @@
-"""
-Schema routing system for multi-tenant per-organisation kanban schemas.
-
-Uses contextvars to track the current organisation, and SQLAlchemy event listeners
-to dynamically inject the correct schema into queries for kanban tables.
-"""
+"""Async schema routing for per-organisation kanban schemas."""
 
 from contextvars import ContextVar
 from typing import Optional
 from uuid import UUID
 
-from sqlalchemy import event, select
-from sqlalchemy.orm import Session
-from sqlalchemy.sql import ClauseElement
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.schema_manager import get_org_schema_name
-from app.models.kanban import Board, List, Task, TaskAssignment, Tag, TaskTag, TaskHistory
+from app.db.schema_manager import KANBAN_SCHEMA_TOKEN, get_org_schema_name
 
 
-# Context var to track the current organisation
 _current_org_id: ContextVar[Optional[UUID]] = ContextVar("current_org_id", default=None)
-
-# Set of kanban model classes that need schema routing
-KANBAN_MODELS = {Board, List, Task, TaskAssignment, Tag, TaskTag, TaskHistory}
 
 
 def set_current_org(org_id: Optional[UUID]) -> None:
-    """
-    Set the current organisation context.
-    
-    Args:
-        org_id: UUID of the organisation, or None to clear context
-    """
     _current_org_id.set(org_id)
 
 
 def get_current_org() -> Optional[UUID]:
-    """Get the current organisation from context."""
     return _current_org_id.get()
 
 
-def init_schema_routing(session: Session) -> None:
-    """
-    Initialize schema routing for a session.
-    
-    Should be called once when the session is created. Attaches event listeners
-    that will modify queries to use the correct org schema.
-    
-    Args:
-        session: SQLAlchemy Session to attach listeners to
-    """
-    @event.listens_for(session, "before_execute", propagate=True)
-    def receive_before_execute(conn, clauseelement, multiparams, params, execution_options):
-        """Intercept queries and inject the correct schema for kanban tables."""
-        org_id = get_current_org()
-        
-        if org_id is None:
-            return
-        
-        schema_name = get_org_schema_name(org_id)
-        
-        # Check if this query involves any kanban tables
-        for model in KANBAN_MODELS:
-            # Temporarily set the schema for query execution
-            if hasattr(clauseelement, "table") and clauseelement.table.name in {
-                Board.__tablename__,
-                List.__tablename__,
-                Task.__tablename__,
-                TaskAssignment.__tablename__,
-                Tag.__tablename__,
-                TaskTag.__tablename__,
-                TaskHistory.__tablename__,
-            }:
-                # Update the table's schema temporarily
-                original_schema = clauseelement.table.schema
-                clauseelement.table.schema = schema_name
-                
-                # Schedule restoration
-                @event.listens_for(conn, "after_execute", once=True)
-                def restore_schema(conn, clauseelement, multiparams, params, execution_options):
-                    clauseelement.table.schema = original_schema
+def get_org_schema_translate_map(org_id: UUID) -> dict[str, str]:
+    return {KANBAN_SCHEMA_TOKEN: get_org_schema_name(org_id)}
+
+
+async def bind_org_schema(session: AsyncSession, org_id: Optional[UUID]) -> None:
+    if org_id is None:
+        session.info.pop("org_schema_translate_map", None)
+        set_current_org(None)
+        return
+
+    set_current_org(org_id)
+    translate_map = get_org_schema_translate_map(org_id)
+    session.info["org_schema_translate_map"] = translate_map
+    await session.connection(execution_options={"schema_translate_map": translate_map})
 
 
 class OrgSchemaSession:
-    """Context manager for setting up a session for a specific organisation."""
-    
-    def __init__(self, session: Session, org_id: UUID):
-        """
-        Args:
-            session: SQLAlchemy Session
-            org_id: UUID of the organisation to query
-        """
+    """Async context manager that binds kanban queries to one organisation schema."""
+
+    def __init__(self, session: AsyncSession, org_id: UUID):
         self.session = session
         self.org_id = org_id
         self._previous_org: Optional[UUID] = None
-    
-    def __enter__(self):
-        """Set the current organisation context."""
+        self._previous_translate_map: Optional[dict[str, str]] = None
+
+    async def __aenter__(self):
         self._previous_org = get_current_org()
-        set_current_org(self.org_id)
+        self._previous_translate_map = self.session.info.get("org_schema_translate_map")
+        await bind_org_schema(self.session, self.org_id)
         return self.session
-    
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        """Restore the previous organisation context."""
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
         set_current_org(self._previous_org)
+        if self._previous_translate_map is None:
+            self.session.info.pop("org_schema_translate_map", None)
+        else:
+            self.session.info["org_schema_translate_map"] = self._previous_translate_map
         return False

@@ -1,12 +1,9 @@
 from datetime import datetime, timezone
 
-from sqlalchemy.orm import declarative_base
-
+from app.db.base import Base
 
 def utc_now():
     return datetime.now(timezone.utc)
 
-
-Base = declarative_base()
 
 __all__ = ["Base", "utc_now"]

@@ -9,9 +9,10 @@ from .. import Base, utc_now
 
 class List(Base):
     __tablename__ = "lists"
+    __table_args__ = {"schema": "kanban"}
 
     list_id: Mapped[_PyUUID] = mapped_column(PG_UUID(as_uuid=True), default=uuid4, primary_key=True)
-    board_id: Mapped[_PyUUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("boards.board_id", ondelete="CASCADE"), nullable=False)
+    board_id: Mapped[_PyUUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("kanban.boards.board_id", ondelete="CASCADE"), nullable=False)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(String, nullable=True)
     is_final_list: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)

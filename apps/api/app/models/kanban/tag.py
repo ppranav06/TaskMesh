@@ -9,6 +9,7 @@ from .. import Base, utc_now
 
 class Tag(Base):
     __tablename__ = "tags"
+    __table_args__ = {"schema": "kanban"}
 
     tag_id: Mapped[_PyUUID] = mapped_column(PG_UUID(as_uuid=True), default=uuid4, primary_key=True)
     name: Mapped[str] = mapped_column(String(50), nullable=False)
