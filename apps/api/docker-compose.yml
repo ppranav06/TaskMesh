@@ -1,3 +1,17 @@
+# ──────────────────────────────────────────────────────────────────────
+# TaskMesh API – Docker Compose (local / dev)
+# ──────────────────────────────────────────────────────────────────────
+# Usage:
+#   Development (with dev deps, hot-reload):
+#     docker compose up --build
+#
+#   Production-like (no dev deps):
+#     ENVIRONMENT=prod docker compose up --build
+#
+#   Run tests:
+#     docker compose run --rm api-dev pytest -v
+# ──────────────────────────────────────────────────────────────────────
+
 networks:
   taskmesh-net:
     name: taskmesh-net
@@ -7,6 +21,7 @@ volumes:
   pgdata:
 
 services:
+  # ── PostgreSQL ──────────────────────────────────────────────────────
   db:
     image: postgres:17-alpine
     container_name: taskmesh-postgres
@@ -18,8 +33,6 @@ services:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
-      # Optional: auto-run scripts on startup
-      # - ./init.sql:/docker-entrypoint-initdb.d/init.sql
     networks:
       - taskmesh-net
     healthcheck:
@@ -29,3 +42,64 @@ services:
       retries: 10
       start_period: 20s
 
+  # ── API (dev – includes dev deps, hot-reload) ───────────────────────
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        ENVIRONMENT: dev
+    container_name: taskmesh-api
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+    env_file:
+      - .env.local
+    environment:
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_USER: ${DB_USER:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:-postgres}
+      DB_NAME: ${DB_NAME:-taskmesh}
+      DATABASE_URL: postgresql+asyncpg://${DB_USER:-postgres}:${DB_PASSWORD:-postgres}@db:5432/${DB_NAME:-taskmesh}
+      ENV_FILE: /dev/null
+    ports:
+      - "8000:8000"
+    volumes:
+      # Mount source for hot-reload during development
+      - ./app:/app/app
+      - ./alembic:/app/alembic
+      - ./alembic.ini:/app/alembic.ini
+      - ./tests:/app/tests
+      - ./pytest.ini:/app/pytest.ini
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - taskmesh-net
+    restart: unless-stopped
+
+  # ── API Prod (no dev deps, no source mount) ─────────────────────────
+  api-prod:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        ENVIRONMENT: prod
+    container_name: taskmesh-api-prod
+    environment:
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_USER: ${DB_USER:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:-postgres}
+      DB_NAME: ${DB_NAME:-taskmesh}
+      DATABASE_URL: postgresql+asyncpg://${DB_USER:-postgres}:${DB_PASSWORD:-postgres}@db:5432/${DB_NAME:-taskmesh}
+      ENV_FILE: /dev/null
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - taskmesh-net
+    restart: unless-stopped
+    profiles:
+      - prod
